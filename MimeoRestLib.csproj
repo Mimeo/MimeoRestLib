@@ -44,6 +44,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Classes\Address.cs" />
+    <Compile Include="Classes\Enums.cs" />
     <Compile Include="Classes\Document.cs" />
     <Compile Include="RestApi.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

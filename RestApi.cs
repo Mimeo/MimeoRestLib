@@ -26,7 +26,9 @@ namespace Mimeo.MimeoConnect
 		public static string serverProduction = "https://connect.mimeo.com/2012/02/";				// Production Service
 		public static XNamespace ns = "http://schemas.mimeo.com/MimeoConnect/2012/02/StorageService";
 		public static XNamespace nsOrder = "http://schemas.mimeo.com/MimeoConnect/2012/02/Orders";
-		public static XNamespace nsESLOrder = "http://schemas.mimeo.com/EnterpriseServices/2008/09/OrderService";
+        public static XNamespace nsESLOrder = "http://schemas.mimeo.com/EnterpriseServices/2008/09/OrderService";
+        public static XNamespace nsESLStorage = "http://schemas.mimeo.com/EnterpriseServices/2008/09/StorageService";
+        public static XNamespace nsi = "http://www.w3.org/2001/XMLSchema-instance";
 		#endregion
 
 
@@ -147,6 +149,79 @@ namespace Mimeo.MimeoConnect
             return HttpWebPost(doc, storageEndpoint);
         }
 
+        public XDocument DeleteDocument(string folder, string fileId)
+        {
+            var storageEndpoint = new Uri(server + storageService + "/Document/" + folder);
+
+            // REMOVE
+            var deleteEndpoint = new Uri(storageEndpoint + "/" + fileId);
+
+            var doc = HttpWebAction(deleteEndpoint, "DELETE");
+
+            XDocument xDoc = XDocument.Parse(doc.OuterXml);
+            return xDoc;
+
+        }
+
+        public XDocument DeletePrintFile(string folder, string fileId)
+        {
+            var storageEndpoint = new Uri(server + storageService + "/" + folder);
+
+            // REMOVE
+            var deleteEndpoint = new Uri(storageEndpoint + "/" + fileId);
+
+            var doc = HttpWebAction(deleteEndpoint, "DELETE");
+
+            XDocument xDoc = XDocument.Parse(doc.OuterXml);
+            return xDoc;
+
+        }
+
+        public XDocument updateDocument(string docId, string fileId, string templateId)
+        {
+
+            // Get Print File Information
+            var fileXML = GetStoreItem(fileId);
+            string printFileId = (from file in fileXML.Descendants(nsESLStorage + "StoreItem")
+                               select file.Element(nsESLStorage + "Id").Value).FirstOrDefault();
+            string pageCount = (from file in fileXML.Descendants(nsESLStorage + "ItemDetails")
+                                select file.Element(nsESLStorage + "PageCount").Value).FirstOrDefault();
+
+            // Get Template Information
+            var templateXML = GetStoreItem(templateId);
+            string templateName = (from file in templateXML.Descendants(nsESLStorage + "StoreItem")
+                               select file.Element(nsESLStorage + "Name").Value).FirstOrDefault();
+
+            // Get Document Information
+            var docXML = GetStoreItem(docId, StoreItemLevelOfDetail.IncludeFolder);
+            string docFolderName = (from file in docXML.Descendants(nsESLStorage + "Folder")
+                                   select file.Element(nsESLStorage + "Name").Value).FirstOrDefault();
+            string docName = (from file in docXML.Descendants(nsESLStorage + "StoreItem")
+                                    select file.Element(nsESLStorage + "Name").Value).FirstOrDefault();
+
+            var documentXML = GetDocument(docId);
+
+            var docTempId = documentXML.Descendants(nsOrder + "DocumentTemplateId").FirstOrDefault();
+            docTempId.Value = templateId;
+            var docTempName = documentXML.Descendants(nsOrder + "DocumentTemplateName").FirstOrDefault();
+            docTempName.Value = templateName;
+            var source = documentXML.Descendants(nsOrder + "Source").FirstOrDefault();
+            source.Value = printFileId;
+            var range = documentXML.Descendants(nsOrder + "Range").FirstOrDefault();
+            range.Value = string.Format("[1,{0}]", pageCount);
+
+            // Update Document
+            string createDocument = string.Format("/Document");
+            Uri storageEndpoint = new Uri(server + storageService + createDocument);
+            XmlDocument inXml = new XmlDocument();
+            inXml.Load(documentXML.CreateReader());
+            XmlDocument newDoc = HttpWebPost(inXml, storageEndpoint, "PUT");
+
+            documentXML = XDocument.Parse(newDoc.OuterXml);
+            return documentXML;
+
+        }
+
 		#endregion
 
 		#region Protocol
@@ -193,7 +268,6 @@ namespace Mimeo.MimeoConnect
 			return result;
 		}
 
-
 		public void HttpWebGet(XmlDocument doc, Uri ordersEndpoint)
 		{
 			var encoding = new UTF8Encoding();
@@ -219,6 +293,36 @@ namespace Mimeo.MimeoConnect
 				doc.LoadXml(xmlOut);
 			}
 		}
+
+        private XmlDocument HttpWebAction(Uri ordersEndpoint, string action)
+        {
+            XmlDocument retDocument = new XmlDocument();
+
+            var encoding = new UTF8Encoding();
+
+            HttpWebRequest objRequest;
+            HttpWebResponse objResponse;
+            StreamReader srResponse;
+
+            // Initialize request object  
+            objRequest = (HttpWebRequest)WebRequest.Create(ordersEndpoint);
+            objRequest.Headers.Add(HttpRequestHeader.Authorization, authorizationData);
+            objRequest.Method = action;
+            objRequest.AllowWriteStreamBuffering = true;
+
+            // Get response
+            objResponse = (HttpWebResponse)objRequest.GetResponse();
+            srResponse = new StreamReader(objResponse.GetResponseStream(), Encoding.ASCII);
+            string xmlOut = srResponse.ReadToEnd();
+            srResponse.Close();
+
+            if (xmlOut != null && xmlOut.Length > 0)
+            {
+                retDocument.LoadXml(xmlOut);
+            }
+
+            return retDocument;
+        }
 
 		private static WebResponse GetWebResponseWithFaultException(HttpWebRequest httpWebRequest)
 		{
@@ -246,7 +350,51 @@ namespace Mimeo.MimeoConnect
 		#endregion
 
 		#region Helpers
-		
+
+        public XDocument GetDocument(string Id)
+        {
+            XmlDocument retDoc = new XmlDocument();
+
+            try
+            {
+                string docFinder = "/Document/GetDocument?DocumentId=" + Id;
+                var storageEndpoint = new Uri(server + storageService + docFinder);
+
+                HttpWebGet(retDoc, storageEndpoint);
+            }
+            catch (Exception ex)
+            {
+                throw ex;
+            }
+
+            XDocument retXMl = XDocument.Parse(retDoc.OuterXml);
+            return retXMl;
+        }
+
+        public XDocument GetStoreItem(string Id)
+        {
+            return GetStoreItem(Id, StoreItemLevelOfDetail.IncludeItemDetails);
+        }
+
+        public XDocument GetStoreItem(string Id, StoreItemLevelOfDetail LevelOfDetail)
+        {
+
+            string xmlRequest =
+           "<GetStoreItemRequest xmlns=\"http://schemas.mimeo.com/EnterpriseServices/2008/09/StorageService\">" +
+           "<ItemId>" + Id + "</ItemId>" +
+           "<LevelOfDetail>" + LevelOfDetail +"</LevelOfDetail>" +
+           "</GetStoreItemRequest>";
+
+            XmlDocument doc = new XmlDocument();
+            doc.LoadXml(xmlRequest);
+
+            Uri storageEndpoint = new Uri(server + storageService + "/GetStoreItem");
+            XmlDocument xmlDoc = HttpWebPost(doc, storageEndpoint);
+
+            XDocument retXMl = XDocument.Parse(xmlDoc.OuterXml);
+            return retXMl;
+        }
+
 		public void setShippingOption(XmlDocument orderRequest, string shipOption, int idx)
 		{
 			// Select 2nd day delivery for Recipient 1
