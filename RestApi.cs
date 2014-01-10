@@ -222,6 +222,19 @@ namespace Mimeo.MimeoConnect
 
         }
 
+        public XDocument GetInfo(string friendlyId, string action)
+        {
+            Uri ordersEndpoint;
+            XmlDocument resultDoc = new XmlDocument();
+            string statusPath = string.Format("orders/{0}/{1}", friendlyId, action);
+            ordersEndpoint = new Uri(server + statusPath);
+            HttpWebGet(resultDoc, ordersEndpoint);
+
+            return XDocument.Parse(resultDoc.OuterXml);
+        }
+
+
+
 		#endregion
 
 		#region Protocol
@@ -334,22 +347,54 @@ namespace Mimeo.MimeoConnect
 			}
 			catch(WebException we)
 			{
-				if(we.Status == WebExceptionStatus.ProtocolError)
-				{
-					using(Stream stream = we.Response.GetResponseStream())
-					{
-						var doc = new XmlDocument();
-						doc.XmlResolver = null;
-						doc.Load(stream);
-					}
-				}
-				throw;
+                String restError = null;
+                if (we.Status == WebExceptionStatus.ProtocolError)
+                {
+                    using (Stream stream = we.Response.GetResponseStream())
+                    {
+                        var doc = new XmlDocument();
+                        doc.XmlResolver = null;
+                        doc.Load(stream);
+                        restError = doc.InnerXml;
+                    }
+                }
+                throw new System.Exception(restError, we.InnerException);
 			}
 			return response;
 		}
 		#endregion
 
 		#region Helpers
+
+        public Guid FindDocumentIdbyName(string name)
+        {
+            String retDocId = "-1";
+            XDocument docs = FindStoreItem(name);
+
+            retDocId = (from file in docs.Descendants(nsESLStorage + "StoreItem")
+                        select file.Element(nsESLStorage + "Id").Value).FirstOrDefault();
+
+            return Guid.Parse(retDocId);
+        }
+
+        public XDocument FindStoreItem(string name)
+        {
+
+            string xmlRequest =
+           "<StoreItemSearchCriteria xmlns=\"http://schemas.mimeo.com/EnterpriseServices/2008/09/StorageService\">" +
+           "<PageInfo xmlns=\"http://schemas.mimeo.com/EnterpriseServices/2008/09/Common/Search\"><PageSize>20</PageSize><PageNumber>1</PageNumber></PageInfo>" +
+           "<Name>" + name + "</Name>" +
+           "<Type>Document</Type>" +
+           "</StoreItemSearchCriteria>";
+
+            XmlDocument doc = new XmlDocument();
+            doc.LoadXml(xmlRequest);
+
+            XmlDocument apiResult = FindStoreItems(doc);
+
+            XDocument retXMl = XDocument.Parse(apiResult.OuterXml);
+            return retXMl;
+        }
 
         public XDocument GetDocument(string Id)
         {
@@ -413,15 +458,19 @@ namespace Mimeo.MimeoConnect
 		}
 		public void AddLineItems(XmlDocument orderRequest, List<Document> documents)
 		{
-
 			XmlNode lineItemsRootNode = orderRequest.GetElementsByTagName("LineItems")[0];
 			lineItemsRootNode.RemoveAll();
 
-			XmlNode addLineItemRequest = orderRequest.CreateElement("AddLineItemRequest", nsESLOrder.NamespaceName);
-
-
 			foreach(Document doc in documents)
 			{
+                XmlNode addLineItemRequest = orderRequest.CreateElement("AddLineItemRequest", nsESLOrder.NamespaceName);
+
+                if (doc.id == Guid.Empty)
+                {
+                    // Let's get GUID by Name
+                    doc.id = FindDocumentIdbyName(doc.Name);
+                }
+
 				XmlNode nameNode = orderRequest.CreateElement("Name", nsESLOrder.NamespaceName);
 				XmlNode nameTextNode = orderRequest.CreateTextNode(doc.Name);
 				nameNode.AppendChild(nameTextNode);
@@ -458,7 +507,7 @@ namespace Mimeo.MimeoConnect
 
 			XmlNode nodeId = orderRequest.CreateElement("Id",
 				"http://schemas.mimeo.com/EnterpriseServices/2008/09/OrderService");
-			nodeId.InnerText = "524D8417-6E1D-466F-A0BE-627A4FA742DF";
+            nodeId.InnerText = "00000000-0000-0000-0000-000000000001";
 			paymentMethodCodesRoot.AppendChild(nodeId);
 		}
 		public void PopulateRecipients(XmlDocument orderRequest, List<Address> addresses)
@@ -469,6 +518,17 @@ namespace Mimeo.MimeoConnect
 
 			foreach(Address inAddress in addresses)
 			{
+
+                if (inAddress.firstName == inAddress.lastName)
+                {                
+                    //Some companies will be sending us a full name:  First\bLast Name
+                    //Let address that rule
+                    string[] tmpName = inAddress.firstName.Split(' ');
+                    inAddress.firstName = tmpName[0];
+                    inAddress.lastName = (tmpName.Length > 0) ? tmpName[1] : "";
+                    inAddress.lastName = inAddress.lastName.Replace(",", "");
+                }
+
 				XmlNode addRecipientRequest = orderRequest.CreateElement("AddRecipientRequest", nsESLOrder.NamespaceName);
 				XmlNode address = orderRequest.CreateElement("Address", nsESLOrder.NamespaceName);
 
