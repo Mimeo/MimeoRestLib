@@ -222,6 +222,51 @@ namespace Mimeo.MimeoConnect
 
         }
 
+
+        public XDocument createDocument(string newDocName, string newDocFolder, string fileId, string templateId)
+        {
+
+            // Get Print File Information
+            var fileXML = GetStoreItem(fileId);
+            string printFileId = (from file in fileXML.Descendants(nsESLStorage + "StoreItem")
+                                  select file.Element(nsESLStorage + "Id").Value).FirstOrDefault();
+            string pageCount = (from file in fileXML.Descendants(nsESLStorage + "ItemDetails")
+                                select file.Element(nsESLStorage + "PageCount").Value).FirstOrDefault();
+
+            // Get Template Information
+            var templateXML = GetStoreItem(templateId);
+            string templateName = (from file in templateXML.Descendants(nsESLStorage + "StoreItem")
+                                   select file.Element(nsESLStorage + "Name").Value).FirstOrDefault();
+
+            // Get Document Information
+            string docFolderName = newDocFolder;
+
+            var documentXML = GetNewDocument(templateId);
+
+            var docName = documentXML.Descendants(nsOrder + "Name").FirstOrDefault();
+            docName.Value = newDocName;
+            var docTempId = documentXML.Descendants(nsOrder + "DocumentTemplateId").FirstOrDefault();
+            docTempId.Value = templateId;
+            var docTempName = documentXML.Descendants(nsOrder + "DocumentTemplateName").FirstOrDefault();
+            docTempName.Value = templateName;
+            var source = documentXML.Descendants(nsOrder + "Source").FirstOrDefault();
+            source.Value = printFileId;
+            var range = documentXML.Descendants(nsOrder + "Range").FirstOrDefault();
+            range.Value = string.Format("[1,{0}]", pageCount);
+
+            // Create Document
+            string createDocument = string.Format("/Document/{0}", newDocFolder);
+            Uri storageEndpoint = new Uri(server + storageService + createDocument);
+            XmlDocument inXml = new XmlDocument();
+            inXml.Load(documentXML.CreateReader());
+            XmlDocument newDoc = HttpWebPost(inXml, storageEndpoint, "POST");
+
+            documentXML = XDocument.Parse(newDoc.OuterXml);
+            return documentXML;
+
+        }
+
+
         public XDocument GetInfo(string friendlyId, string action)
         {
             Uri ordersEndpoint;
@@ -337,6 +382,94 @@ namespace Mimeo.MimeoConnect
             return retDocument;
         }
 
+
+        private static XDocument doUploadPDF(Uri uri, string fileName)
+        {
+            XDocument myResult = new XDocument();
+
+            string boundary = "----------" + DateTime.Now.Ticks.ToString("x");
+
+            try
+            {
+                HttpWebRequest webrequest = (HttpWebRequest)WebRequest.Create(uri);
+                webrequest.Headers.Add(HttpRequestHeader.Authorization, authorizationData);
+                webrequest.ContentType = "multipart/form-data; boundary=" + boundary;
+                webrequest.Method = "POST";
+
+                // Build up the post message header
+                StringBuilder sb = new StringBuilder();
+                sb.Append("--");
+                sb.Append(boundary);
+                sb.Append("\r\n");
+                sb.Append("Content-Disposition: form-data; name=\"");
+                sb.Append("file");
+                sb.Append("\"; filename=\"" + fileName + "\"");
+                sb.Append("\r\n");
+                sb.Append("Content-Type: application/octet-stream");
+                sb.Append("\r\n");
+                sb.Append("\r\n");
+
+                string postHeader = sb.ToString();
+
+                byte[] postHeaderBytes = Encoding.UTF8.GetBytes(postHeader);
+
+                // Build the trailing boundary string as a byte array
+                // ensuring the boundary appears on a line by itself
+                byte[] boundaryBytes = Encoding.ASCII.GetBytes("\r\n--" + boundary + "\r\n");
+
+                using (Stream fileStream = File.OpenRead(fileName))
+                {
+                    if (fileStream != null)
+                    {
+                        long length = postHeaderBytes.Length + fileStream.Length + boundaryBytes.Length;
+
+                        webrequest.ContentLength = length;
+
+                        Stream requestStream = webrequest.GetRequestStream();
+
+                        // Write out our post header
+                        requestStream.Write(postHeaderBytes, 0, postHeaderBytes.Length);
+
+                        // Write out the file contents
+                        byte[] buffer = new Byte[checked((uint)Math.Min(4096, (int)fileStream.Length))];
+
+                        int bytesRead = 0;
+
+                        int i = 0;
+
+                        while ((bytesRead = fileStream.Read(buffer, 0, buffer.Length)) != 0)
+                        {
+                            requestStream.Write(buffer, 0, bytesRead);
+                            i++;
+                        }
+
+                        // Write out the trailing boundary
+                        requestStream.Write(boundaryBytes, 0, boundaryBytes.Length);
+
+                        WebResponse response = GetWebResponseWithFaultException(webrequest);
+                        Stream s = response.GetResponseStream();
+                        StreamReader sr = new StreamReader(s);
+                        myResult = XDocument.Load(sr);
+                    }
+                    else
+                    {
+                        throw new Exception("File stream is null");
+                    }
+                }
+            }
+            catch (WebException we)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                throw;
+            }
+
+            return myResult;
+        }
+
+
 		private static WebResponse GetWebResponseWithFaultException(HttpWebRequest httpWebRequest)
 		{
 			WebResponse response = null;
@@ -365,6 +498,23 @@ namespace Mimeo.MimeoConnect
 		#endregion
 
 		#region Helpers
+
+        public XDocument UploadPDF(string folder, string filePath)
+        {
+            XDocument retDoc = new XDocument();
+
+            try
+            {
+                Uri storageEndpoint = new Uri(server + storageService + "/" + folder);
+                retDoc = doUploadPDF(storageEndpoint, filePath);
+            }
+            catch (Exception ex)
+            {
+                throw ex;
+            }
+
+            return retDoc;
+        }
 
         public Guid FindDocumentIdbyName(string name)
         {
@@ -403,6 +553,27 @@ namespace Mimeo.MimeoConnect
             try
             {
                 string docFinder = "/Document/GetDocument?DocumentId=" + Id;
+                var storageEndpoint = new Uri(server + storageService + docFinder);
+
+                HttpWebGet(retDoc, storageEndpoint);
+            }
+            catch (Exception ex)
+            {
+                throw ex;
+            }
+
+            XDocument retXMl = XDocument.Parse(retDoc.OuterXml);
+            return retXMl;
+        }
+
+
+        public XDocument GetNewDocument(string templateId)
+        {
+            XmlDocument retDoc = new XmlDocument();
+
+            try
+            {
+                string docFinder = "/NewDocument?DocumentTemplateId=" + templateId;
                 var storageEndpoint = new Uri(server + storageService + docFinder);
 
                 HttpWebGet(retDoc, storageEndpoint);
