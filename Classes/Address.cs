@@ -24,6 +24,17 @@ namespace Mimeo.MimeoConnect
 			set;
 		}
 
+        public string apartmentOrSuite
+        {
+            get;
+            set;
+        }
+
+        public string careOf
+        {
+            get;
+            set;
+        }
 		public string city
 		{
 			get;
