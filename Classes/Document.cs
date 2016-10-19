@@ -23,5 +23,15 @@ namespace Mimeo.MimeoConnect
 			get;
 			set;
 		}
+        public string pdfPath
+        {
+            get;
+            set;
+        }
+        public string pdfTemplate
+        {
+            get;
+            set;
+        }
 	}
 }

@@ -63,7 +63,11 @@ namespace Mimeo.MimeoConnect
 			get;
 			set;
 		}
-
+        public string email
+        {
+            get;
+            set;
+        }
 		public string shipping
 		{
 			get;

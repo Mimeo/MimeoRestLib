@@ -66,16 +66,19 @@ namespace Mimeo.MimeoConnect
 
 		#region Public Interface
 		public void Initialize(string user, string password)
-		{
+        {
+            System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 			this.Initialize(user, password, true);
 		}
 		public void Initialize(string user, string password, bool sandbox)
-		{
+        {
+            System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 			string inServer = (sandbox) ? serverSandbox : serverProduction;
 			this.Initialize(user, password, inServer);
 		}
 		public void Initialize(string user, string password, string serverEndPoint)
 		{
+            System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 			ServicePointManager.ServerCertificateValidationCallback += ValidateRemoteCertificate;
 			var userName_password = user + ":" + password;
 			byte[] encDataByte = System.Text.Encoding.UTF8.GetBytes(userName_password);
@@ -425,6 +428,39 @@ namespace Mimeo.MimeoConnect
 		}
 
 
+        public XDocument createNewDocument(string newDocName, string newDocFolder, string fileId, string templateId, string pages)
+        {
+
+            // Get Print File Information
+            var fileXML = GetStoreItem(fileId);
+            string printFileId = (from file in fileXML.Descendants(nsESLStorage + "StoreItem")
+                                  select file.Element(nsESLStorage + "Id").Value).FirstOrDefault();
+            string pageCount = (from file in fileXML.Descendants(nsESLStorage + "ItemDetails")
+                                select file.Element(nsESLStorage + "PageCount").Value).FirstOrDefault();
+
+            // Get Document Information
+            string docFolderName = newDocFolder;
+
+            var documentXML = GetNewDocument(templateId);
+
+            var docName = documentXML.Descendants(nsOrder + "Name").FirstOrDefault();
+            docName.Value = newDocName;
+
+            XmlDocument inXml = new XmlDocument();
+            inXml.LoadXml(documentXML.ToString());
+            PopulateProductSections(inXml, printFileId, pages, "1");
+
+            // Create Document
+            string createDocument = string.Format("/Document/{0}", newDocFolder);
+            Uri storageEndpoint = new Uri(server + storageService + createDocument);
+            XmlDocument newDoc = HttpWebPost(inXml, storageEndpoint, "POST");
+
+            documentXML = XDocument.Parse(newDoc.OuterXml);
+            return documentXML;
+
+        }
+
+
         public void PopulateProductSection(XmlDocument orderRequest, string printFileId, string pageCount, string copies)
         {
             var qty = orderRequest.GetElementsByTagName("Quantity")[0];
@@ -534,6 +570,7 @@ namespace Mimeo.MimeoConnect
 			var webrequest = (HttpWebRequest)WebRequest.Create(ordersEndpoint);
 			webrequest.Headers.Add(HttpRequestHeader.Authorization, authorizationData);
 			webrequest.Method = action;
+            webrequest.ProtocolVersion = HttpVersion.Version11;
 			// Set the ContentType property of the WebRequest.
 			webrequest.ContentType = "application/xml";
 
